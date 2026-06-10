@@ -11,7 +11,7 @@ class Server {
         @JvmStatic
         fun main(args: Array<String>) {
             try {
-                Server().start(args)
+                Server().start()
             } catch (e: Exception) {
                 Log.e(TAG, "Fail to start server", e)
             }
@@ -19,15 +19,11 @@ class Server {
     }
 
     private val executor = Executors.newCachedThreadPool()
-    fun start(args: Array<String>) {
-        Log.i(TAG, "Start server")
-
+    fun start() {
         val server = LocalServerSocket("aya")
-        Log.i(TAG, "Server started, listening on ${server.localSocketAddress}")
 
         while (true) {
             val conn = Connection(server.accept())
-            Log.i(TAG, "Client connected")
             executor.submit(conn)
         }
     }

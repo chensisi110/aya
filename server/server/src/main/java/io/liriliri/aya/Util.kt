@@ -15,17 +15,30 @@ object Util {
         return list.toTypedArray()
     }
 
-    fun drawableToBitmap(drawable: Drawable): Bitmap {
+    fun drawableToBitmap(drawable: Drawable, fallbackSize: Int = 96): Bitmap {
+        var width = drawable.intrinsicWidth
+        var height = drawable.intrinsicHeight
+        if (width <= 0 || height <= 0) {
+            width = fallbackSize
+            height = fallbackSize
+        }
         val bitmap = Bitmap.createBitmap(
-            drawable.intrinsicWidth,
-            drawable.intrinsicHeight,
+            width,
+            height,
             Bitmap.Config.ARGB_8888
         )
         bitmap.setHasAlpha(true)
         val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, drawable.intrinsicWidth, drawable.intrinsicHeight)
+        drawable.setBounds(0, 0, width, height)
         drawable.draw(canvas)
         return bitmap
+    }
+
+    fun scaleBitmap(bitmap: Bitmap, size: Int): Bitmap {
+        if (bitmap.width == size && bitmap.height == size) {
+            return bitmap
+        }
+        return Bitmap.createScaledBitmap(bitmap, size, size, true)
     }
 
     fun bitMapToPng(bitmap: Bitmap, quality: Int): ByteArray {
