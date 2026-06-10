@@ -20,7 +20,7 @@ class Connection(private val client: LocalSocket) : Thread() {
     private companion object {
         private const val TAG = "Aya.Connection"
         private var packageCache = JSONObject()
-        private const val ICON_CACHE_DIR = "/sdcard/miku/icons"
+        private const val ICON_CACHE_DIR = "/sdcard/hatsune_miku_cache/icons"
 
         init {
             val iconCacheDir = File(ICON_CACHE_DIR)
