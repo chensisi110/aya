@@ -7,12 +7,26 @@ import java.io.FileInputStream
 import java.net.ServerSocket
 import java.net.URLDecoder
 
+object IconCache {
+    const val DIR = "/sdcard/hatsune_miku_cache/icons"
+
+    fun isAllowed(path: File): Boolean {
+        return try {
+            val root = File(DIR).canonicalFile
+            val target = path.canonicalFile
+            target.path == root.path || target.path.startsWith(root.path + File.separator)
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
+
 class HttpFileServer(port: Int) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response {
         val decoded = URLDecoder.decode(session.uri, "UTF-8")
         val target = File(decoded)
 
-        if (!target.exists() || target.isDirectory) {
+        if (!IconCache.isAllowed(target) || !target.exists() || target.isDirectory) {
             return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not Found")
         }
 
@@ -52,9 +66,15 @@ object HttpFileServerManager {
     }
 
     @Synchronized
-    fun stop() {
+    private fun stop() {
         server?.stop()
         server = null
+    }
+
+    @Synchronized
+    fun isRunning(): Boolean {
+        val current = server ?: return false
+        return isServerHealthy(current)
     }
 
     private fun isServerHealthy(srv: HttpFileServer): Boolean {

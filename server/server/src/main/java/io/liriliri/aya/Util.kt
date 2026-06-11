@@ -15,7 +15,7 @@ object Util {
         return list.toTypedArray()
     }
 
-    fun drawableToBitmap(drawable: Drawable, fallbackSize: Int = 96): Bitmap {
+    fun drawableToBitmap(drawable: Drawable, fallbackSize: Int): Bitmap {
         var width = drawable.intrinsicWidth
         var height = drawable.intrinsicHeight
         if (width <= 0 || height <= 0) {

@@ -5,7 +5,6 @@ import android.content.res.AssetManager
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.net.LocalSocket
-import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import org.json.JSONArray
@@ -23,11 +22,10 @@ class Connection(private val client: LocalSocket) : Thread() {
         private val packageCacheLock = Any()
         private val resourcesCache = ConcurrentHashMap<String, Resources>()
         private val queryExecutor = Executors.newFixedThreadPool(QUERY_PARALLELISM)
-        private const val ICON_CACHE_DIR = "/sdcard/hatsune_miku_cache/icons"
-        private const val ICON_SIZE = 64
+        private const val ICON_SIZE = 48
 
         init {
-            val iconCacheDir = File(ICON_CACHE_DIR)
+            val iconCacheDir = File(IconCache.DIR)
             if (!iconCacheDir.exists()) {
                 iconCacheDir.mkdirs()
             }
@@ -53,10 +51,6 @@ class Connection(private val client: LocalSocket) : Thread() {
         val result = JSONObject()
 
         when (method) {
-            "getVersion" -> {
-                result.put("version", getVersion())
-            }
-
             "getPackageInfos" -> {
                 result.put("packageInfos", getPackageInfos(JSONObject(params)))
             }
@@ -66,6 +60,10 @@ class Connection(private val client: LocalSocket) : Thread() {
                 result.put("port", port)
             }
 
+            "isFileServerRunning" -> {
+                result.put("running", HttpFileServerManager.isRunning())
+            }
+
             else -> {
                 Log.e(TAG, "Unknown method: $method")
             }
@@ -73,10 +71,6 @@ class Connection(private val client: LocalSocket) : Thread() {
 
         Wire.Response.newBuilder().setId(id).setResult(result.toString()).build()
             .writeDelimitedTo(client.outputStream)
-    }
-
-    private fun getVersion(): String {
-        return BuildConfig.VERSION_NAME
     }
 
     private fun getPackageInfos(params: JSONObject): JSONArray {
@@ -126,46 +120,31 @@ class Connection(private val client: LocalSocket) : Thread() {
         val apkPath = applicationInfo.sourceDir
         val apkSize = File(apkPath).length()
 
-        var label = packageName
-
         val cacheKey = "$packageName.$apkSize"
+        var label = packageName
         var icon = ""
 
-        val cacheHit = synchronized(packageCacheLock) {
-            packageCache.has(cacheKey)
-        }
-
-        if (cacheHit) {
-            synchronized(packageCacheLock) {
+        synchronized(packageCacheLock) {
+            if (packageCache.has(cacheKey)) {
                 val cacheInfo = packageCache.getJSONObject(cacheKey)
                 label = cacheInfo.getString("label")
                 icon = cacheInfo.getString("icon")
-            }
-        } else {
-            val resources = getResources(applicationInfo)
-            val labelRes = applicationInfo.labelRes
-            if (labelRes != 0) {
-                try {
-                    label = resources.getString(labelRes)
-                } catch (_: Exception) {
+            } else {
+                val resources = getResources(applicationInfo)
+                if (applicationInfo.labelRes != 0) {
+                    try {
+                        label = resources.getString(applicationInfo.labelRes)
+                    } catch (_: Exception) {
+                    }
                 }
-            }
-
-            synchronized(packageCacheLock) {
-                if (packageCache.has(cacheKey)) {
-                    val cacheInfo = packageCache.getJSONObject(cacheKey)
-                    label = cacheInfo.getString("label")
-                    icon = cacheInfo.getString("icon")
-                } else {
-                    val cacheInfo = JSONObject()
-                    cacheInfo.put("label", label)
-                    cacheInfo.put("icon", "")
-                    packageCache.put(cacheKey, cacheInfo)
-                }
+                val cacheInfo = JSONObject()
+                cacheInfo.put("label", label)
+                cacheInfo.put("icon", "")
+                packageCache.put(cacheKey, cacheInfo)
             }
         }
 
-        icon = ensureIconOnDisk(packageName, cacheKey, applicationInfo, icon)
+        icon = ensureIconOnDisk(cacheKey, applicationInfo, icon)
         synchronized(packageCacheLock) {
             if (packageCache.has(cacheKey)) {
                 packageCache.getJSONObject(cacheKey).put("icon", icon)
@@ -176,11 +155,11 @@ class Connection(private val client: LocalSocket) : Thread() {
         info.put("packageName", packageInfo.packageName)
         info.put("label", label)
         info.put("icon", icon)
+        info.put("enabled", applicationInfo.enabled)
         return info
     }
 
     private fun ensureIconOnDisk(
-        packageName: String,
         cacheKey: String,
         applicationInfo: ApplicationInfo,
         cachedIconPath: String,
@@ -190,12 +169,11 @@ class Connection(private val client: LocalSocket) : Thread() {
         }
 
         val resources = getResources(applicationInfo)
-        val iconPath = savePackageIcon(packageName, cacheKey, applicationInfo, resources)
+        val iconPath = savePackageIcon(cacheKey, applicationInfo, resources)
         return if (iconPath.isNotEmpty() && File(iconPath).exists()) iconPath else ""
     }
 
     private fun savePackageIcon(
-        packageName: String,
         cacheKey: String,
         applicationInfo: ApplicationInfo,
         resources: Resources,
@@ -205,16 +183,11 @@ class Connection(private val client: LocalSocket) : Thread() {
         }
 
         try {
-            val iconPath = "$ICON_CACHE_DIR/$cacheKey.png"
+            val iconPath = "${IconCache.DIR}/$cacheKey.png"
             val file = File(iconPath)
             synchronized(iconPath.intern()) {
                 if (!file.exists()) {
-                    val resIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        resources.getDrawable(applicationInfo.icon, null)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        resources.getDrawable(applicationInfo.icon)
-                    }
+                    val resIcon = resources.getDrawable(applicationInfo.icon, null)
                     val bitmapIcon = Util.drawableToBitmap(resIcon, ICON_SIZE)
                     val scaledIcon = Util.scaleBitmap(bitmapIcon, ICON_SIZE)
                     val pngIcon = Util.bitMapToPng(scaledIcon, 100)
@@ -234,11 +207,9 @@ class Connection(private val client: LocalSocket) : Thread() {
 
     private fun resourcesCacheKey(applicationInfo: ApplicationInfo): String {
         val key = StringBuilder(applicationInfo.sourceDir)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            applicationInfo.splitSourceDirs
-                ?.sorted()
-                ?.forEach { splitPath -> key.append('|').append(splitPath) }
-        }
+        applicationInfo.splitSourceDirs
+            ?.sorted()
+            ?.forEach { splitPath -> key.append('|').append(splitPath) }
         return key.toString()
     }
 
@@ -254,11 +225,8 @@ class Connection(private val client: LocalSocket) : Thread() {
         val addAssetManagerMethod =
             assetManager.javaClass.getMethod("addAssetPath", String::class.java)
         addAssetManagerMethod.invoke(assetManager, applicationInfo.sourceDir)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            applicationInfo.splitSourceDirs?.forEach { splitPath ->
-                addAssetManagerMethod.invoke(assetManager, splitPath)
-            }
+        applicationInfo.splitSourceDirs?.forEach { splitPath ->
+            addAssetManagerMethod.invoke(assetManager, splitPath)
         }
 
         val displayMetrics = DisplayMetrics()
